@@ -11,10 +11,10 @@ use Little::Schemer;
 say car car [['a', 'b'], 'c'];  #=> a
 
 # You can see the recursion process of any functions.
-push @$Little::Schemer::sayDump, qw( isMember car );
-say 'YES' unless isMember 'a', [qw(b c d e)];  #=> YES
+push @$Little::Schemer::show, qw( isMember car );
+say 'Not a member.' unless isMember 'z', [qw(a b c d)];  #=> Not a member.
 
-$Little::Schemer::sayDump = [];
+$Little::Schemer::show = [];
 say join('', insertL('y', 'x', [qw(a x b x c)])->@*);  #=> ayxbxc
 ```
 
@@ -31,7 +31,7 @@ use feature 'signatures';
 use warnings;
 no warnings  qw( prototype recursion experimental::signatures );
 
-# redundant forward declarations make you free from the parentheses of tail recursion
+# Redundant forward declarations make you free from the parentheses of tail recursion.
 sub pairreverse :prototype($);
 
 sub pairreverse :prototype($) ($list) {
@@ -40,20 +40,20 @@ sub pairreverse :prototype($) ($list) {
     isNull $list?
         []:
         cons
-            # sometimes parentheses are necessary!
+            # Sometimes parentheses are necessary, for subtle grounds!
             cons( car cdr car $list, [car car $list] ),
             pairreverse cdr $list;
 }
 
-push @$Little::Schemer::sayDump, qw( pairreverse cdr );
+push @$Little::Schemer::show, qw( pairreverse cdr );
 say dump_of pairreverse [['a', 'b'], ['c', 'd'], ['e', 'f']];
-#=> $VAR1 = [ [ 'b', 'a' ], [ 'd', 'c' ], [ 'f', 'e' ] ];
+                    #=> [['b', 'a'], ['d', 'c'], ['f', 'e']]
 ```
 
 ## Dependent CPAN (Non-Core) Modules
 
 - Sub::Prepend
-- Carp::Assert (it's OK without this)
+- Carp::Assert (it's ok without this)
 
 ## Version
 
@@ -61,4 +61,6 @@ say dump_of pairreverse [['a', 'b'], ['c', 'd'], ['e', 'f']];
 
 ## License
 
-(stub)
+Copyright© 2020-tbd., TANIGUCHI Ippei. All rights reserved.
+
+This module is free software; you can redistribute it and/or modify it under the same terms as Perl 5 itself.

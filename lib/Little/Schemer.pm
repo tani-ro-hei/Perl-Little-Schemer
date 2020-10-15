@@ -4,6 +4,9 @@ use 5.22.0;
 use feature 'signatures';
 use warnings;
 no warnings  qw( prototype recursion redefine experimental::signatures );
+
+use constant { T => 1, F => 0 };
+
 use Carp          qw();
 use Data::Dumper  qw();
 use List::Util    qw();
@@ -24,26 +27,27 @@ sub import {
         } %{ __PACKAGE__.'::' }
     ;
     for my $cname (@codenames) {
-        next if $cname =~ /^(?: assert | import | get_subname | except | dump_of | dmp )$/x;
+        next if $cname =~ /^(?: assert | import | _get_subname | except | dump_of | dmp )$/x;
 
         Sub::Prepend::prepend $cname => sub {
             dmp(\@_, $cname);
         }
     }
-
     my $tgt = caller;
+    for my $cname (@codenames) {
+        next if $cname =~ /^(?: assert | import | _get_subname )$/x;
 
-    *{ $tgt."::$_" } = \&{ __PACKAGE__."::$_" }
-        for @codenames;
+        *{ $tgt."::$cname" } = \&{ __PACKAGE__."::$cname" };
+    }
 }
 
-sub get_subname {
+sub _get_subname {
     my ($pkg, $subname) = (caller 2)[0, 3];
     $subname =~ s/^${pkg}:://r;
 }
 
 sub except ($msg) {
-    my $subname = get_subname;
+    my $subname = _get_subname;
     Carp::croak "$subname: $msg\n";
 }
 
@@ -52,14 +56,18 @@ sub dump_of ($var) {
     for ($d) {
         s/^\s+|\s+$//gm;
         s/\n+/ /gs;
+        s/^\$VAR1 = |;$//g;
+        s/\[ /[/g;
+        s/ \]/]/g;
     }
     return $d;
 }
 
-our $sayDump = [];
+our $show = [];
 sub dmp ($args, $subname = undef) {
-    $subname //= get_subname;
-    return unless List::Util::first { $_ eq $subname } $sayDump->@*;
+    $subname //= _get_subname;
+    return unless 'ARRAY' eq (ref $show // '');
+    return unless List::Util::first { $_ eq $subname } $show->@*;
 
     my $d = dump_of $args;
     say "  $subname: $d";
@@ -68,26 +76,33 @@ sub dmp ($args, $subname = undef) {
 
 # # #
 
-sub True  :prototype() { 1 }
-sub False :prototype() { 0 }
-
 sub isSExp :prototype($) ($exp) {
-    (!ref($exp) or ref($exp) eq 'ARRAY')?
-        True : False;
+    return T  if !ref $exp;
+    return T  if ref $exp eq 'ARRAY';
+    return F;
 }
 
 sub isAtom :prototype($) ($s_exp) {
     except 'not an S-exp!' unless isSExp $s_exp;
 
-    (!ref($s_exp))?
-        True : False;
+    (!ref $s_exp)?  T : F;
 }
 
 sub isNull :prototype($) ($list) {
     except 'not a list!' if isAtom $list;
 
-    (!($list->@*))?
-        True : False;
+    (! $list->@*)?  T : F;
+}
+
+sub isEq :prototype($$) ($atom1, $atom2) {
+    except 'not an atom!' unless isAtom $atom1;
+    except 'not an atom!' unless isAtom $atom2;
+
+    ($atom1 eq $atom2)?  T : F;
+}
+
+sub Or :prototype($$) ($bool1, $bool2) {
+    ($bool1 or $bool2)?  T : F;
 }
 
 sub car :prototype($) ($ne_list) {
@@ -111,7 +126,9 @@ sub cons :prototype($$) ($s_exp, $list) {
     return [ $s_exp, $list->@* ];
 }
 
-    $assertable  and eval <<'END_OF_ASSERTIONS';  die "$@" if $@;
+{
+    local $@;
+    eval <<'END_OF_ASSERTIONS' if $assertable;
 assert( isSExp 'hoge'                           );
 assert( isSExp 42                               );
 assert( isSExp [qw/ a b c d /]                  );
@@ -123,6 +140,9 @@ assert( !isAtom [qw/ a b c d /]                 );
 assert( isNull []                               );
 assert( !isNull [1, 2, 3]                       );
 assert( !isNull [[]]                            );
+assert( isEq 'ab', 'ab'                         );
+assert( !isEq 'ab', 'cd'                        );
+assert( isEq Or(T, F), T                        );
 assert( car ['a', 'b'] eq 'a'                   );
 assert( (car [['a', 'b'], 'c'])->[1] eq 'b'     );
 assert( (cdr ['a', 'b', 'c'])->[0] eq 'b'       );
@@ -132,6 +152,8 @@ assert( (cons 'a', ['b', 'c'])->[1] eq 'b'      );
 assert( (cons 'a', ['b', 'c'])->[2] eq 'c'      );
 assert( !defined +(cons 'a', ['b', 'c'])->[3]   );
 END_OF_ASSERTIONS
+    die "$@" if $@;
+}
 
 
 sub isLat    :prototype($);
@@ -145,10 +167,10 @@ sub isLat :prototype($) ($list) {
     except 'not a list!' if isAtom $list;
 
     isNull $list?
-        True:
+        T:
         isAtom car $list?
             isLat cdr $list:
-            False;
+            F;
 }
 
 sub isMember :prototype($$) ($atom, $lat) {
@@ -156,9 +178,9 @@ sub isMember :prototype($$) ($atom, $lat) {
     except 'not a lat!' unless isLat $lat;
 
     isNull $lat?
-        False:
-        car $lat eq $atom?
-            True:
+        F:
+        Or
+            isEq( car $lat, $atom ),
             isMember $atom, cdr $lat;
 }
 
@@ -168,7 +190,7 @@ sub rember :prototype($$) ($atom, $lat) {
 
     isNull $lat?
         []:
-        car $lat eq $atom?
+        isEq( car $lat, $atom )?
             cdr $lat:
             cons car $lat, rember $atom, cdr $lat;
 }
@@ -187,7 +209,7 @@ sub insertR :prototype($$$) ($new, $old, $lat) {
 
     isNull $lat?
         []:
-        car $lat eq $old?
+        isEq( car $lat, $old )?
             cons $old, cons $new, cdr $lat:
             cons car $lat, insertR $new, $old, cdr $lat;
 }
@@ -198,12 +220,14 @@ sub insertL :prototype($$$) ($new, $old, $lat) {
 
     isNull $lat?
         []:
-        car $lat eq $old?
+        isEq( car $lat, $old )?
             cons $new, $lat:
             cons car $lat, insertL $new, $old, cdr $lat;
 }
 
-    $assertable  and eval <<'END_OF_ASSERTIONS';  die "$@" if $@;
+{
+    local $@;
+    eval <<'END_OF_ASSERTIONS' if $assertable;
 assert( isLat [qw/a b c d/]                                          );
 assert( !isLat ['a', [qw(b c)], 'd']                                 );
 assert( isMember 'a', [qw(a b c d)]                                  );
@@ -218,6 +242,8 @@ assert( !defined +(firsts [[['a'], 'b'], [[], 'd'], ['e']])->[3]     );
 assert( join('', insertR('y', 'x', [qw(a x b x c)])->@*) eq 'axybxc' );
 assert( join('', insertL('y', 'x', [qw(a x b x c)])->@*) eq 'ayxbxc' );
 END_OF_ASSERTIONS
+    die "$@" if $@;
+}
 
 
 1;
