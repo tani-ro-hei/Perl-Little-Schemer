@@ -1,10 +1,13 @@
-package Little::Schemer 0.01;
+package Little::Schemer 0.02;
 
 use 5.22.0;
+use feature 'signatures';
 use warnings;
-no warnings 'prototype';
-use Carp          qw( croak );
-use Data::Dumper  qw( Dumper );
+no warnings  qw( prototype recursion redefine experimental::signatures );
+use Carp          qw();
+use Data::Dumper  qw();
+use List::Util    qw();
+use Sub::Prepend  qw();
 
 our $assertable;
 BEGIN {
@@ -12,40 +15,53 @@ BEGIN {
     $Little::Schemer::assertable = 1  unless $@;
 }
 
-
 sub import {
+    no strict 'refs';
+
+    my @codenames
+        = grep {
+            defined *{ __PACKAGE__."::$_" }{CODE};
+        } %{ __PACKAGE__.'::' }
+    ;
+    for my $cname (@codenames) {
+        next if $cname =~ /^(?: assert | import | get_subname | except | dump_of | dmp )$/x;
+
+        Sub::Prepend::prepend $cname => sub {
+            dmp(\@_, $cname);
+        }
+    }
+
     my $tgt = caller;
 
-    no strict 'refs';
     *{ $tgt."::$_" } = \&{ __PACKAGE__."::$_" }
-        for grep { defined *{ __PACKAGE__."::$_" }{CODE} }
-            %{ __PACKAGE__.'::' };
+        for @codenames;
 }
 
 sub get_subname {
-    state $pkg = __PACKAGE__;
-    (my $subname = (caller 2)[3]) =~ s/^${pkg}:://;
-    return $subname;
+    my ($pkg, $subname) = (caller 2)[0, 3];
+    $subname =~ s/^${pkg}:://r;
 }
 
-sub except {
-    my $msg = shift;
-    my $subname = get_subname();
-
-    croak "$subname: $msg\n";
+sub except ($msg) {
+    my $subname = get_subname;
+    Carp::croak "$subname: $msg\n";
 }
 
-our $sayDump = 0;
-sub dmp {
-    my $args = shift;
-    my $subname = get_subname();
-    return if !$sayDump  or $sayDump ne $subname;
-
-    my $d = Dumper($args);
+sub dump_of ($var) {
+    my $d = Data::Dumper::Dumper($var);
     for ($d) {
         s/^\s+|\s+$//gm;
         s/\n+/ /gs;
     }
+    return $d;
+}
+
+our $sayDump = [];
+sub dmp ($args, $subname = undef) {
+    $subname //= get_subname;
+    return unless List::Util::first { $_ eq $subname } $sayDump->@*;
+
+    my $d = dump_of $args;
     say "  $subname: $d";
 }
 
@@ -55,35 +71,32 @@ sub dmp {
 sub True  :prototype() { 1 }
 sub False :prototype() { 0 }
 
-sub isSExp :prototype($) {
-    my $exp = shift;
-
-    !ref($exp) or ref($exp) eq 'ARRAY';
+sub isSExp :prototype($) ($exp) {
+    (!ref($exp) or ref($exp) eq 'ARRAY')?
+        True : False;
 }
 
-sub isAtom :prototype($) {
-    my $s_exp = shift;
+sub isAtom :prototype($) ($s_exp) {
     except 'not an S-exp!' unless isSExp $s_exp;
 
-    !ref($s_exp);
+    (!ref($s_exp))?
+        True : False;
 }
 
-sub isNull :prototype($) {
-    my $list = shift;
+sub isNull :prototype($) ($list) {
     except 'not a list!' if isAtom $list;
 
-    !($list->@*);
+    (!($list->@*))?
+        True : False;
 }
 
-sub car :prototype($) {
-    my $ne_list = shift;
+sub car :prototype($) ($ne_list) {
     except 'null list!' if isNull $ne_list;
 
     return $ne_list->[0];
 }
 
-sub cdr :prototype($) {
-    my $ne_list = shift;
+sub cdr :prototype($) ($ne_list) {
     except 'null list!' if isNull $ne_list;
 
     my $new_list = [ $ne_list->@* ];
@@ -91,15 +104,14 @@ sub cdr :prototype($) {
     return $new_list;
 }
 
-sub cons :prototype($$) {
-    my ($s_exp, $list) = @_;
+sub cons :prototype($$) ($s_exp, $list) {
     except 'not an S-exp!' unless isSExp $s_exp;
     except 'not a list!' if isAtom $list;
 
     return [ $s_exp, $list->@* ];
 }
 
-    $assertable  and eval <<'END_OF_ASSERTIONS';
+    $assertable  and eval <<'END_OF_ASSERTIONS';  die "$@" if $@;
 assert( isSExp 'hoge'                           );
 assert( isSExp 42                               );
 assert( isSExp [qw/ a b c d /]                  );
@@ -129,9 +141,7 @@ sub firsts   :prototype($);
 sub insertR  :prototype($$$);
 sub insertL  :prototype($$$);
 
-sub isLat :prototype($) {
-    dmp \@_;
-    my $list = shift;
+sub isLat :prototype($) ($list) {
     except 'not a list!' if isAtom $list;
 
     isNull $list?
@@ -141,21 +151,18 @@ sub isLat :prototype($) {
             False;
 }
 
-sub isMember :prototype($$) {
-    dmp \@_;
-    my ($atom, $lat) = @_;
+sub isMember :prototype($$) ($atom, $lat) {
     except 'not an atom!' unless isAtom $atom;
     except 'not a lat!' unless isLat $lat;
 
     isNull $lat?
         False:
-        car $lat eq $atom
-            or isMember $atom, cdr $lat;
+        car $lat eq $atom?
+            True:
+            isMember $atom, cdr $lat;
 }
 
-sub rember :prototype($$) {
-    dmp \@_;
-    my ($atom, $lat) = @_;
+sub rember :prototype($$) ($atom, $lat) {
     except 'not an atom!' unless isAtom $atom;
     except 'not a lat!' unless isLat $lat;
 
@@ -166,9 +173,7 @@ sub rember :prototype($$) {
             cons car $lat, rember $atom, cdr $lat;
 }
 
-sub firsts :prototype($) {
-    dmp \@_;
-    my $list = shift;
+sub firsts :prototype($) ($list) {
     except 'not a list!' if isAtom $list;
 
     isNull $list?
@@ -176,9 +181,7 @@ sub firsts :prototype($) {
         cons car car $list, firsts cdr $list;
 }
 
-sub insertR :prototype($$$) {
-    dmp \@_;
-    my ($new, $old, $lat) = @_;
+sub insertR :prototype($$$) ($new, $old, $lat) {
     except 'not an atom!' unless isAtom $new and isAtom $old;
     except 'not a lat!' unless isLat $lat;
 
@@ -189,9 +192,7 @@ sub insertR :prototype($$$) {
             cons car $lat, insertR $new, $old, cdr $lat;
 }
 
-sub insertL :prototype($$$) {
-    dmp \@_;
-    my ($new, $old, $lat) = @_;
+sub insertL :prototype($$$) ($new, $old, $lat) {
     except 'not an atom!' unless isAtom $new and isAtom $old;
     except 'not a lat!' unless isLat $lat;
 
@@ -202,7 +203,7 @@ sub insertL :prototype($$$) {
             cons car $lat, insertL $new, $old, cdr $lat;
 }
 
-    $assertable  and eval <<'END_OF_ASSERTIONS';
+    $assertable  and eval <<'END_OF_ASSERTIONS';  die "$@" if $@;
 assert( isLat [qw/a b c d/]                                          );
 assert( !isLat ['a', [qw(b c)], 'd']                                 );
 assert( isMember 'a', [qw(a b c d)]                                  );
