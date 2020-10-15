@@ -1,4 +1,4 @@
-package Little::Schemer 0.10;
+package Little::Schemer 0.01;
 
 use 5.22.0;
 use warnings;
@@ -11,21 +11,6 @@ BEGIN {
     local $@;  eval "use Carp::Assert 'assert';";
     $Little::Schemer::assertable = 1  unless $@;
 }
-
-
-=head1 SYNOPSIS
-
-    use Little::Schemer;
-    say car car [['a', 'b'], 'c'];  #=> a
-
-    # You can see the recursion process of &isMember or as you want.
-    $Little::Schemer::sayDump = 'isMember';
-    say 'YES' unless isMember 'a', [qw(b c d e)];  #=> YES
-
-    undef $Little::Schemer::sayDump;
-    say join('', insertL('y', 'x', [qw(a x b x c)])->@*);  #=> ayxbxc
-
-=cut
 
 
 sub import {
